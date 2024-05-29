@@ -1,8 +1,10 @@
 package org.springframework.ai.spark.api;
 
+import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import com.fasterxml.jackson.annotation.JsonInclude;
 import com.fasterxml.jackson.annotation.JsonProperty;
 import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.DeserializationFeature;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.SerializationFeature;
 import groovy.util.logging.Slf4j;
@@ -17,6 +19,7 @@ import reactor.netty.http.client.HttpClient;
 
 import java.nio.charset.StandardCharsets;
 import java.util.List;
+import java.util.Map;
 
 /**
  * @author nottyjay
@@ -30,9 +33,8 @@ public class SparkApi {
 
   static {
     mapper.configure(SerializationFeature.FAIL_ON_EMPTY_BEANS, false);
+    mapper.configure(DeserializationFeature.READ_UNKNOWN_ENUM_VALUES_AS_NULL, true);
   }
-
-
 
   public SparkApi(SparkOptions options) {
     this.options = options;
@@ -57,12 +59,12 @@ public class SparkApi {
                 throw new RuntimeException(e);
               }
             });
-    return response.doOnNext((message) -> {
-      try {
-        return Flux.just(mapper.readValue(message, ChatCompletionChunk.class));
-      } catch (JsonProcessingException e) {
-        throw new RuntimeException(e);
-      }
+    return response.map(message -> {
+        try {
+            return mapper.readValue(message, ChatCompletionChunk.class);
+        } catch (JsonProcessingException e) {
+            throw new RuntimeException(e);
+        }
     });
   }
 
@@ -94,7 +96,8 @@ public class SparkApi {
 
   @JsonInclude(JsonInclude.Include.NON_NULL)
   public record ChatCompletionRequestPayload(
-          @JsonProperty("message") ChatCompletionRequestPayloadMessage message){
+          @JsonProperty("message") ChatCompletionRequestPayloadMessage message,
+          @JsonProperty("functions") ChatCompletionRequestPayloadFunction function){
   }
 
   @JsonInclude(JsonInclude.Include.NON_NULL)
@@ -106,6 +109,18 @@ public class SparkApi {
   public record ChatCompletionMessage(
           @JsonProperty("content") String content,
           @JsonProperty("role") Role role) {}
+
+  @JsonInclude(JsonInclude.Include.NON_NULL)
+  public record ChatCompletionRequestPayloadFunction(
+          @JsonProperty("text") List<FunctionText> text
+  ) {}
+
+  @JsonInclude(JsonInclude.Include.NON_NULL)
+  public record FunctionText (
+          @JsonProperty("name") String name,
+          @JsonProperty("description") String description,
+          @JsonProperty("parameters") Map<String, Object> parameters
+          ) {}
 
   /**
    * The role of the author of this message.
@@ -149,8 +164,10 @@ public class SparkApi {
   }
 
   @JsonInclude(JsonInclude.Include.NON_NULL)
+  @JsonIgnoreProperties(ignoreUnknown = true)
   public record ChatCompletionChunk(
-          @JsonProperty("header") ChatCompletionChunkHeader header) {}
+          @JsonProperty("header") ChatCompletionChunkHeader header,
+          @JsonProperty("payload") ChatCompletionChunkPayload payload) {}
 
   @JsonInclude(JsonInclude.Include.NON_NULL)
   public record ChatCompletionChunkHeader(
@@ -159,4 +176,36 @@ public class SparkApi {
           @JsonProperty("sid") String sid,
           @JsonProperty("status") Integer status) {}
 
+  @JsonInclude(JsonInclude.Include.NON_NULL)
+  public record ChatCompletionChunkPayload(
+          @JsonProperty("choices") ChatCompletionChunkPayloadChoices choices,
+          @JsonProperty("usage") ChatCompletionChunkPayloadUsage usage
+  ){}
+
+  @JsonInclude(JsonInclude.Include.NON_NULL)
+  public record ChatCompletionChunkPayloadChoices(
+          @JsonProperty("status") Integer status,
+          @JsonProperty("seq") Integer seq,
+          @JsonProperty("text") List<ChatCompletionChunkPayloadChoicesText> text
+  ){}
+
+  @JsonInclude(JsonInclude.Include.NON_NULL)
+  public record ChatCompletionChunkPayloadChoicesText(
+          @JsonProperty("content") String content,
+          @JsonProperty("role") String role,
+          @JsonProperty("index") Integer index
+  ){}
+
+  @JsonInclude(JsonInclude.Include.NON_NULL)
+  public record ChatCompletionChunkPayloadUsage(
+          @JsonProperty("text") ChatCompletionChunkPayloadUsageText text
+  ){}
+
+  @JsonInclude(JsonInclude.Include.NON_NULL)
+  public record ChatCompletionChunkPayloadUsageText(
+          @JsonProperty("question_tokens") Integer questionTokens,
+          @JsonProperty("prompt_tokens") Integer promptTokens,
+          @JsonProperty("completion_tokens") Integer completionTokens,
+          @JsonProperty("total_tokens") Integer totalTokens
+  ) {}
 }
