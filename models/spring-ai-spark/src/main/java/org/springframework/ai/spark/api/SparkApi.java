@@ -14,9 +14,6 @@ import org.springframework.ai.spark.util.SparkUtils;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 import reactor.netty.http.client.HttpClient;
-import reactor.netty.http.websocket.WebsocketInbound;
-import reactor.netty.http.websocket.WebsocketOutbound;
-import reactor.netty.transport.ProxyProvider;
 
 import java.nio.charset.StandardCharsets;
 import java.util.List;
@@ -41,7 +38,7 @@ public class SparkApi {
     this.options = options;
   }
 
-  public Flux chatCompletionStream(ChatCompletionRequest request) {
+  public Flux<ChatCompletionChunk> chatCompletionStream(ChatCompletionRequest request) {
     HttpClient client = HttpClient.create();
     String url ="wss://spark-api.xf-yun.com/v3.5/chat?" + SparkUtils.signature(this.options.appKey(), this.options.appSecret(), "spark-api.xf-yun.com", Model.Spark_3_5_MAX);
     if(log.isDebugEnabled()) {
@@ -54,14 +51,19 @@ public class SparkApi {
                 if(log.isDebugEnabled()){
                   log.debug("content: {}", content);
                 }
-                websocketOutbound.send(Mono.just(Unpooled.wrappedBuffer(content.getBytes(StandardCharsets.UTF_8)))).neverComplete();
+                websocketOutbound.send(Mono.just(Unpooled.wrappedBuffer(content.getBytes(StandardCharsets.UTF_8)))).neverComplete().subscribe();
                 return websocketInbound.receive().asString();
               } catch (JsonProcessingException e) {
                 throw new RuntimeException(e);
               }
             });
-    response.subscribe(System.out::println);
-    return Flux.empty();
+    return response.doOnNext((message) -> {
+      try {
+        return Flux.just(mapper.readValue(message, ChatCompletionChunk.class));
+      } catch (JsonProcessingException e) {
+        throw new RuntimeException(e);
+      }
+    });
   }
 
   @JsonInclude(JsonInclude.Include.NON_NULL)
@@ -145,4 +147,16 @@ public class SparkApi {
       return path;
     }
   }
+
+  @JsonInclude(JsonInclude.Include.NON_NULL)
+  public record ChatCompletionChunk(
+          @JsonProperty("header") ChatCompletionChunkHeader header) {}
+
+  @JsonInclude(JsonInclude.Include.NON_NULL)
+  public record ChatCompletionChunkHeader(
+          @JsonProperty("code") Integer code,
+          @JsonProperty("message") String message,
+          @JsonProperty("sid") String sid,
+          @JsonProperty("status") Integer status) {}
+
 }
